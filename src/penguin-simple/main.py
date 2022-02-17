@@ -5,26 +5,25 @@ import os
 import tensorflow as tf
 from tfx import v1 as tfx
 from absl import logging
-
 logging.set_verbosity(logging.INFO)  # Set default logging level.
 
 print('TensorFlow version: {}'.format(tf.__version__))
 print('TFX version: {}'.format(tfx.__version__))
 
+PROJECT_ROOT = os.path.join(os.environ['HOME'], 'private_workspace/demo-tfx')
+
 PIPELINE_NAME = "penguin-simple"
 
-DATA_ROOT = 'data/{}'.format(PIPELINE_NAME)
 # data/data.csv
 # https://raw.githubusercontent.com/tensorflow/tfx/master/tfx/examples/penguin/data/labelled/penguins_processed.csv
+DATA_ROOT = os.path.join(PROJECT_ROOT, 'data/penguin-simple')
+OUTPUT_ROOT = os.path.join(PROJECT_ROOT, 'output')
 
-OUTPUT_ROOT = 'output'
-PIPELINE_ROOT = os.path.join(OUTPUT_ROOT, 'pipelines', PIPELINE_NAME)
-METADATA_PATH = os.path.join(OUTPUT_ROOT, 'metadata', PIPELINE_NAME, 'metadata.db')
-SERVING_MODEL_DIR = os.path.join(OUTPUT_ROOT, 'serving_model', PIPELINE_NAME)
+PIPELINE_ROOT = os.path.join(OUTPUT_ROOT, PIPELINE_NAME, 'pipelines')
+METADATA_PATH = os.path.join(OUTPUT_ROOT, PIPELINE_NAME, 'metadata', 'metadata.db')
+SERVING_MODEL_DIR = os.path.join(OUTPUT_ROOT, PIPELINE_NAME, 'serving_model')
 
-_trainer_module_file = os.path.join(
-    os.environ['HOME'], 'private_workspace/demo-tfx/src/penguin-simple', 'penguin_trainer.py'
-)
+_trainer_module_file = os.path.join(PROJECT_ROOT, 'src/penguin-simple', 'penguin_trainer.py')
 
 
 def _create_pipeline(
@@ -47,12 +46,7 @@ def _create_pipeline(
             filesystem=tfx.proto.PushDestination.Filesystem(base_directory=serving_model_dir)
         )
     )
-    # Following three components will be included in the pipeline.
-    components = [
-        example_gen,
-        trainer,
-        pusher,
-    ]
+    components = [example_gen, trainer, pusher, ]
     return tfx.dsl.Pipeline(
         pipeline_name=pipeline_name,
         pipeline_root=pipeline_root,
