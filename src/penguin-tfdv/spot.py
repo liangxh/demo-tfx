@@ -7,14 +7,13 @@ from tfx.orchestration.portable.mlmd import execution_lib
 from tfx.orchestration.experimental.interactive import visualizations
 from tfx.orchestration.experimental.interactive import standard_visualizations
 
+SCHEMA_PIPELINE_NAME = "penguin-tfdv-schema"
+PIPELINE_NAME = "penguin-tfdv"
 
 PROJECT_ROOT = os.path.join(os.environ['HOME'], 'private_workspace/demo-tfx')
 
 DATA_ROOT = os.path.join(PROJECT_ROOT, 'data/penguin-simple')
 OUTPUT_ROOT = os.path.join(PROJECT_ROOT, 'output')
-
-SCHEMA_PIPELINE_NAME = "penguin-tfdv-schema"
-PIPELINE_NAME = "penguin-tfdv"
 
 SCHEMA_PIPELINE_ROOT = os.path.join(OUTPUT_ROOT, SCHEMA_PIPELINE_NAME, 'pipelines')
 SCHEMA_METADATA_PATH = os.path.join(OUTPUT_ROOT, SCHEMA_PIPELINE_NAME, 'metadata', 'metadata.db')

@@ -1,14 +1,27 @@
+from typing import List
 from absl import logging
 import tensorflow as tf
 from tensorflow import keras
+from tensorflow_metadata.proto.v0 import schema_pb2
 from tfx import v1 as tfx
 from tfx_bsl.public import tfxio
-from tensorflow_metadata.proto.v0 import schema_pb2
 
 _LABEL_KEY = 'species'
 
 _TRAIN_BATCH_SIZE = 20
 _EVAL_BATCH_SIZE = 10
+
+
+def _input_fn(
+        file_pattern: List[str],
+        data_accessor: tfx.components.DataAccessor,
+        schema: schema_pb2.Schema,
+        batch_size: int = 200) -> tf.data.Dataset:
+    return data_accessor.tf_dataset_factory(
+        file_pattern,
+        tfxio.TensorFlowDatasetOptions(batch_size=batch_size, label_key=_LABEL_KEY),
+        schema=schema
+    ).repeat()
 
 
 def _build_keras_model(schema: schema_pb2.Schema) -> tf.keras.Model:
@@ -34,18 +47,8 @@ def _build_keras_model(schema: schema_pb2.Schema) -> tf.keras.Model:
 def run_fn(fn_args: tfx.components.FnArgs):
     # NEW: 对比之前的 schema_utils.schema_from_feature_spec(_FEATURE_SPEC), 直接使用 SchemaGen 得出的结果
     schema = tfx.utils.parse_pbtxt_file(fn_args.schema_path, schema_pb2.Schema())
-
-    train_dataset = fn_args.data_accessor.tf_dataset_factory(
-        fn_args.train_files,
-        tfxio.TensorFlowDatasetOptions(batch_size=_TRAIN_BATCH_SIZE, label_key=_LABEL_KEY),
-        schema=schema
-    ).repeat()
-
-    eval_dataset = fn_args.data_accessor.tf_dataset_factory(
-        fn_args.eval_files,
-        tfxio.TensorFlowDatasetOptions(batch_size=_EVAL_BATCH_SIZE, label_key=_LABEL_KEY),
-        schema=schema
-    ).repeat()
+    train_dataset = _input_fn(fn_args.train_files, fn_args.data_accessor, schema, batch_size=_TRAIN_BATCH_SIZE)
+    eval_dataset = _input_fn(fn_args.eval_files, fn_args.data_accessor, schema, batch_size=_EVAL_BATCH_SIZE)
 
     # NEW: _build_keras_model 加了 schema 的输入参数
     model = _build_keras_model(schema)

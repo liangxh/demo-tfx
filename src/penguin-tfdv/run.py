@@ -126,5 +126,19 @@ def train():
     tfx.orchestration.LocalDagRunner().run(pipeline)
 
 
+@commandr.command('inspect')
+def inspect_saved_model():
+    import tensorflow as tf
+
+    # Find a model with the latest timestamp.
+    model_dirs = (item for item in os.scandir(SERVING_MODEL_DIR) if item.is_dir())
+    model_path = max(model_dirs, key=lambda i: int(i.name)).path
+
+    print(model_path)
+    loaded_model = tf.keras.models.load_model(model_path)
+    inference_fn = loaded_model.signatures['serving_default']
+    print(inference_fn)
+
+
 if __name__ == '__main__':
     commandr.Run()

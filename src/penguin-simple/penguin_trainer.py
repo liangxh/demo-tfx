@@ -1,14 +1,14 @@
+from typing import List
 from absl import logging
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow_transform.tf_metadata import schema_utils
+from tensorflow_metadata.proto.v0 import schema_pb2
 from tfx import v1 as tfx
 from tfx_bsl.public import tfxio
 
 
-_FEATURE_KEYS = [
-    'culmen_length_mm', 'culmen_depth_mm', 'flipper_length_mm', 'body_mass_g'
-]
+_FEATURE_KEYS = ['culmen_length_mm', 'culmen_depth_mm', 'flipper_length_mm', 'body_mass_g']
 _LABEL_KEY = 'species'
 
 _TRAIN_BATCH_SIZE = 20
@@ -21,6 +21,18 @@ _FEATURE_SPEC = {
     },
     _LABEL_KEY: tf.io.FixedLenFeature(shape=[1], dtype=tf.int64)
 }
+
+
+def _input_fn(
+        file_pattern: List[str],
+        data_accessor: tfx.components.DataAccessor,
+        schema: schema_pb2.Schema,
+        batch_size: int = 200) -> tf.data.Dataset:
+    return data_accessor.tf_dataset_factory(
+        file_pattern,
+        tfxio.TensorFlowDatasetOptions(batch_size=batch_size, label_key=_LABEL_KEY),
+        schema=schema
+    ).repeat()
 
 
 def _build_keras_model() -> tf.keras.Model:
@@ -42,18 +54,8 @@ def _build_keras_model() -> tf.keras.Model:
 
 def run_fn(fn_args: tfx.components.FnArgs):
     schema = schema_utils.schema_from_feature_spec(_FEATURE_SPEC)
-
-    train_dataset = fn_args.data_accessor.tf_dataset_factory(
-        fn_args.train_files,
-        tfxio.TensorFlowDatasetOptions(batch_size=_TRAIN_BATCH_SIZE, label_key=_LABEL_KEY),
-        schema=schema
-    ).repeat()
-
-    eval_dataset = fn_args.data_accessor.tf_dataset_factory(
-        fn_args.eval_files,
-        tfxio.TensorFlowDatasetOptions(batch_size=_EVAL_BATCH_SIZE, label_key=_LABEL_KEY),
-        schema=schema
-    ).repeat()
+    train_dataset = _input_fn(fn_args.train_files, fn_args.data_accessor, schema, batch_size=_TRAIN_BATCH_SIZE)
+    eval_dataset = _input_fn(fn_args.eval_files, fn_args.data_accessor, schema, batch_size=_EVAL_BATCH_SIZE)
 
     model = _build_keras_model()
     model.fit(
@@ -63,3 +65,4 @@ def run_fn(fn_args: tfx.components.FnArgs):
         validation_steps=fn_args.eval_steps
     )
     model.save(fn_args.serving_model_dir, save_format='tf')
+
