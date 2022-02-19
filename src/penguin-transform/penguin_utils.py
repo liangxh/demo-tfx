@@ -6,7 +6,6 @@ import tensorflow_transform as tft
 from tfx import v1 as tfx
 from tfx_bsl.public import tfxio
 
-# Specify features that we will use.
 _FEATURE_KEYS = ['culmen_length_mm', 'culmen_depth_mm', 'flipper_length_mm', 'body_mass_g']
 _LABEL_KEY = 'species'
 
@@ -14,70 +13,58 @@ _TRAIN_BATCH_SIZE = 20
 _EVAL_BATCH_SIZE = 10
 
 
-# NEW: TFX Transform will call this function.
+# NEW: 由 Transform 调用
 def preprocessing_fn(inputs):
-    """tf.transform's callback function for preprocessing inputs.
-
-    Args:
-    inputs: map from feature keys to raw not-yet-transformed features.
-
-    Returns:
-    Map from string feature key to transformed feature.
-    """
     outputs = {}
 
-    # Uses features defined in _FEATURE_KEYS only.
+    # 标准化
     for key in _FEATURE_KEYS:
-        # tft.scale_to_z_score computes the mean and variance of the given feature
-        # and scales the output based on the result.
         outputs[key] = tft.scale_to_z_score(inputs[key])
 
-    # For the label column we provide the mapping from string to index.
-    # We could instead use `tft.compute_and_apply_vocabulary()` in order to
-    # compute the vocabulary dynamically and perform a lookup.
-    # Since in this example there are only 3 possible values, we use a hard-coded
-    # table for simplicity.
+    # 完成 species 字段到 ID 的转换, 类别多的话可以用 tft.compute_and_apply_vocabulary()
     table_keys = ['Adelie', 'Chinstrap', 'Gentoo']
     initializer = tf.lookup.KeyValueTensorInitializer(
-        keys=table_keys,
-        values=tf.cast(tf.range(len(table_keys)), tf.int64),
-        key_dtype=tf.string,
-        value_dtype=tf.int64)
+        keys=table_keys, values=tf.cast(tf.range(len(table_keys)), tf.int64),
+        key_dtype=tf.string, value_dtype=tf.int64
+    )
     table = tf.lookup.StaticHashTable(initializer, default_value=-1)
     outputs[_LABEL_KEY] = table.lookup(inputs[_LABEL_KEY])
 
     return outputs
 
 
-# NEW: This function will apply the same transform operation to training data and serving requests.
-def _apply_preprocessing(raw_features, tft_layer):
-    transformed_features = tft_layer(raw_features)
-    if _LABEL_KEY in raw_features:
-        transformed_label = transformed_features.pop(_LABEL_KEY)
+# def _apply_preprocessing(raw_features, tft_layer):
+#     transformed_features = tft_layer(raw_features)
+#     transformed_label = transformed_features.pop(_LABEL_KEY, None)
+#     return transformed_features, transformed_label
+
+
+# NEW: 分別供 _input_fn 和 _get_serve_tf_examples_fn 对训练数据和预测数据做数据预处理
+def _get_transform_fn(tft_layer):
+    def transform_fn(raw_features):
+        transformed_features = tft_layer(raw_features)
+        transformed_label = transformed_features.pop(_LABEL_KEY, None)
         return transformed_features, transformed_label
-    else:
-        return transformed_features, None
+    return transform_fn
 
 
-# NEW: This function will create a handler function which gets a serialized tf.example, preprocess and run an inference with it.
+# NEW: 返回一个 handler 函数，输入为序列化的 tf.example, 输出为预测结果
 def _get_serve_tf_examples_fn(model, tf_transform_output):
-    # We must save the tft_layer to the model to ensure its assets are kept and tracked.
+    # 保存 transform 层
     model.tft_layer = tf_transform_output.transform_features_layer()
+    _transform_fn = _get_transform_fn(model.tft_layer)
+
+    # 只选取需要的特征
+    feature_spec = tf_transform_output.raw_feature_spec()
+    required_feature_spec = {k: v for k, v in feature_spec.items() if k in _FEATURE_KEYS}
 
     @tf.function(input_signature=[tf.TensorSpec(shape=[None], dtype=tf.string, name='examples')])
     def serve_tf_examples_fn(serialized_tf_examples):
-        # Expected input is a string which is serialized tf.Example format.
-        feature_spec = tf_transform_output.raw_feature_spec()
-        # Because input schema includes unnecessary fields like 'species' and
-        # 'island', we filter feature_spec to include required keys only.
-        required_feature_spec = {
-            k: v for k, v in feature_spec.items() if k in _FEATURE_KEYS
-        }
+        # 解析序列化的 examples
         parsed_features = tf.io.parse_example(serialized_tf_examples, required_feature_spec)
-
-        # Preprocess parsed input with transform operation defined in preprocessing_fn().
-        transformed_features, _ = _apply_preprocessing(parsed_features, model.tft_layer)
-        # Run inference with ML model.
+        # 做 transform 转换
+        transformed_features, _ = _transform_fn(parsed_features)
+        # 做预测
         return model(transformed_features)
 
     return serve_tf_examples_fn
@@ -85,21 +72,8 @@ def _get_serve_tf_examples_fn(model, tf_transform_output):
 
 def _input_fn(file_pattern: List[Text],
               data_accessor: tfx.components.DataAccessor,
-              tf_transform_output: tft.TFTransformOutput,
+              tf_transform_output: tft.TFTransformOutput,  # 由原本的 schema 改成了 transform 的輸出
               batch_size: int = 200) -> tf.data.Dataset:
-    """Generates features and label for tuning/training.
-
-    Args:
-        file_pattern: List of paths or patterns of input tfrecord files.
-        data_accessor: DataAccessor for converting input to RecordBatch.
-        tf_transform_output: A TFTransformOutput.
-        batch_size: representing the number of consecutive elements of returned
-          dataset to combine in a single batch
-
-    Returns:
-        A dataset that contains (features, indices) tuple where features is a
-          dictionary of Tensors, and indices is a single Tensor of label indices.
-    """
     dataset = data_accessor.tf_dataset_factory(
         file_pattern,
         tfxio.TensorFlowDatasetOptions(batch_size=batch_size),
@@ -107,11 +81,9 @@ def _input_fn(file_pattern: List[Text],
     )
 
     transform_layer = tf_transform_output.transform_features_layer()
+    _transform_fn = _get_transform_fn(transform_layer)
 
-    def apply_transform(raw_features):
-        return _apply_preprocessing(raw_features, transform_layer)
-
-    return dataset.map(apply_transform).repeat()
+    return dataset.map(_transform_fn).repeat()
 
 
 def _build_keras_model() -> tf.keras.Model:
@@ -131,6 +103,7 @@ def _build_keras_model() -> tf.keras.Model:
     return model
 
 
+# 由 Trainer 调用
 def run_fn(fn_args: tfx.components.FnArgs):
     tf_transform_output = tft.TFTransformOutput(fn_args.transform_output)
 
@@ -145,10 +118,8 @@ def run_fn(fn_args: tfx.components.FnArgs):
         validation_steps=fn_args.eval_steps
     )
 
-    # NEW: Save a computation graph including transform layer.
+    # NEW: 把 transform graph 也加入
     signatures = {
         'serving_default': _get_serve_tf_examples_fn(model, tf_transform_output),
     }
-    print('????????????????????????????????')
-    print(model.save)
     model.save(fn_args.serving_model_dir, save_format='tf', signatures=signatures)

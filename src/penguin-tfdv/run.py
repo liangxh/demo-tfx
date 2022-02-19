@@ -71,7 +71,6 @@ def train():
             schema_path: str, module_file: str, serving_model_dir: str,
             metadata_path: str
     ) -> tfx.dsl.Pipeline:
-        # 输入数据
         example_gen = tfx.components.CsvExampleGen(input_base=data_root)
 
         # NEW: 对新数据做统计

@@ -29,27 +29,22 @@ def main():
             schema_path: str, module_file: str, serving_model_dir: str,
             metadata_path: str) -> tfx.dsl.Pipeline:
         example_gen = tfx.components.CsvExampleGen(input_base=data_root)
-        # 同 penguin-tfdv
         statistics_gen = tfx.components.StatisticsGen(examples=example_gen.outputs['examples'])
-        # 同 penguin-tfdv
         schema_importer = tfx.dsl.Importer(
             source_uri=schema_path, artifact_type=tfx.types.standard_artifacts.Schema
         ).with_id('schema_importer')
-
-        # Performs anomaly detection based on statistics and data schema.
         example_validator = tfx.components.ExampleValidator(
             statistics=statistics_gen.outputs['statistics'],
             schema=schema_importer.outputs['result']
         )
 
-        # NEW: 原来直接传给 trainer 的 schema 输入
+        # NEW: 原来 schema 直接传给 trainer 作为输入, 此例子中由 transform 先做数据预处理
         transform = tfx.components.Transform(
             examples=example_gen.outputs['examples'],
             schema=schema_importer.outputs['result'],
             materialize=False,
             module_file=module_file
         )
-
         trainer = tfx.components.Trainer(
             module_file=module_file,
             examples=example_gen.outputs['examples'],
@@ -61,7 +56,6 @@ def main():
             eval_args=tfx.proto.EvalArgs(num_steps=5)
         )
 
-        # Pushes the model to a filesystem destination.
         pusher = tfx.components.Pusher(
             model=trainer.outputs['model'],
             push_destination=tfx.proto.PushDestination(
@@ -71,7 +65,7 @@ def main():
 
         components = [
             example_gen, statistics_gen, schema_importer,  example_validator,
-            transform,  # NEW: Transform component was added to the pipeline.
+            transform,  # NEW
             trainer, pusher,
         ]
 
